@@ -59,6 +59,7 @@
 
   .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;font-family:'Poppins',sans-serif;font-weight:800;font-size:1rem;border:none;border-radius:999px;padding:16px 30px;cursor:pointer;transition:transform .15s ease;width:100%;}
   .btn:active{transform:scale(.97);}
+  .btn:disabled{opacity:.35;cursor:not-allowed;pointer-events:none;}
   .btn-primary{background:linear-gradient(90deg,var(--orange1),var(--orange2));color:#fff;box-shadow:0 10px 22px rgba(255,138,0,.35);}
   .btn-lime{background:var(--lime);color:var(--navy);box-shadow:0 10px 22px rgba(185,230,53,.35);}
   .btn-outline{background:#fff;color:var(--navy);border:2px solid var(--navy);box-shadow:none;}
@@ -171,6 +172,8 @@
     <div id="feedback"></div>
 
     <div class="btn-row">
+      <button class="btn btn-outline" id="prevBtn" style="display:none;">← Previous Word</button>
+      <button class="btn btn-outline" id="retryBtn" style="display:none;">🔁 Try Again</button>
       <button class="btn btn-primary" id="checkBtn">Check</button>
       <button class="btn btn-lime" id="nextBtn" style="display:none;">Next Word →</button>
     </div>
@@ -216,6 +219,35 @@
   let results = [];
   let checked = false;
   const hasSpeech = 'speechSynthesis' in window;
+  let chosenVoice = null;
+
+  const FEMALE_VOICE_PREFERENCES = [
+    'Google US English', 'Samantha', 'Microsoft Aria Online (Natural) - English (United States)',
+    'Microsoft Zira Desktop', 'Microsoft Zira', 'Aria', 'Jenny', 'Zira',
+    'Victoria', 'Karen', 'Moira', 'Tessa', 'Fiona', 'Female'
+  ];
+
+  function pickVoice(){
+    if(!hasSpeech) return;
+    const voices = window.speechSynthesis.getVoices();
+    if(!voices || !voices.length) return;
+    const englishVoices = voices.filter(function(v){ return v.lang && v.lang.toLowerCase().indexOf('en') === 0; });
+    const pool = englishVoices.length ? englishVoices : voices;
+    for(let i=0;i<FEMALE_VOICE_PREFERENCES.length;i++){
+      const match = pool.find(function(v){ return v.name.indexOf(FEMALE_VOICE_PREFERENCES[i]) !== -1; });
+      if(match){ chosenVoice = match; return; }
+    }
+    const guess = pool.find(function(v){
+      const n = v.name.toLowerCase();
+      return n.indexOf('female') !== -1 || n.indexOf('woman') !== -1 || n.indexOf('zira') !== -1 || n.indexOf('samantha') !== -1;
+    });
+    chosenVoice = guess || pool[0];
+  }
+
+  if(hasSpeech){
+    pickVoice();
+    window.speechSynthesis.onvoiceschanged = pickVoice;
+  }
 
   function shuffle(arr){
     const a = arr.slice();
@@ -232,6 +264,9 @@
     const u = new SpeechSynthesisUtterance(text);
     u.lang = 'en-US';
     u.rate = rate || 0.82;
+    u.pitch = 1.05;
+    u.volume = 1;
+    if(chosenVoice) u.voice = chosenVoice;
     window.speechSynthesis.speak(u);
   }
 
@@ -259,6 +294,8 @@
     document.getElementById('feedback').innerHTML = '';
     document.getElementById('checkBtn').style.display = 'inline-flex';
     document.getElementById('nextBtn').style.display = 'none';
+    document.getElementById('retryBtn').style.display = 'none';
+    document.getElementById('prevBtn').style.display = (idx > 0) ? 'inline-flex' : 'none';
     document.getElementById('progressLabel').textContent = 'WORD ' + (idx+1) + ' OF ' + queue.length;
     document.getElementById('scorePill').textContent = 'Score: ' + score + '/' + idx;
     document.getElementById('barFill').style.width = Math.round((idx/queue.length)*100) + '%';
@@ -293,8 +330,18 @@
     results.push({word: queue[idx].word, correct: correct, userAnswer: userVal});
     document.getElementById('checkBtn').style.display = 'none';
     document.getElementById('nextBtn').style.display = 'inline-flex';
+    document.getElementById('prevBtn').style.display = 'none';
+    document.getElementById('retryBtn').style.display = correct ? 'none' : 'inline-flex';
     document.getElementById('scorePill').textContent = 'Score: ' + score + '/' + (idx+1);
   }
+
+  function retryWord(){
+    if(results.length === idx + 1){
+      results.pop();
+    }
+    loadWord();
+  }
+  document.getElementById('retryBtn').addEventListener('click', retryWord);
 
   document.getElementById('checkBtn').addEventListener('click', checkAnswer);
   document.getElementById('answerInput').addEventListener('keydown', function(e){
@@ -313,6 +360,19 @@
     }
   }
   document.getElementById('nextBtn').addEventListener('click', nextWord);
+
+  function goToPrevious(){
+    if(idx === 0) return;
+    // discard the current word's result (if already checked) and the previous word's
+    // old result, so the previous word can be answered again fresh.
+    while(results.length > idx - 1){
+      const removed = results.pop();
+      if(removed.correct) score--;
+    }
+    idx--;
+    loadWord();
+  }
+  document.getElementById('prevBtn').addEventListener('click', goToPrevious);
 
   function showResults(){
     document.getElementById('practiceScreen').style.display = 'none';
